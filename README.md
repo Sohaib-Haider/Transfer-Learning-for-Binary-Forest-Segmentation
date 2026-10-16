@@ -1,77 +1,85 @@
 # Transfer Learning for Binary Forest Segmentation
 
-Comparative study: training U-Net (ResNet50 encoder) **from scratch** vs **transfer learning** for forest / non-forest segmentation.
+Comparative study of U-Net (ResNet50 encoder) trained **from scratch** vs **with ImageNet transfer learning** for forest / non-forest segmentation.
 
 ## Dataset
 - **Source:** [Augmented Forest Segmentation (Kaggle)](https://www.kaggle.com/datasets/quadeer15sh/augmented-forest-segmentation)
 - **Task:** Binary segmentation (Forest = 1, Non-Forest = 0)
-- **Input:** RGB satellite image
+- **Input:** RGB image (256×256, resized to 128×128)
 - **Output:** Binary mask
-- **Structure:** metadata CSV (`image`, `mask` columns), `images/` folder, `masks/` folder
+- **Size:** 5,108 image–mask pairs from 190 original pictures
 
 ## Model
-- U-Net with ResNet50 encoder (`segmentation_models`)
-- Output: 1 channel, sigmoid activation
+- U-Net, ResNet50 encoder (`segmentation_models`), 1 output channel, sigmoid activation
 
 ## Experiments
 
 | | Experiment 1 | Experiment 2 |
 |---|---|---|
 | Encoder weights | Random (`None`) | ImageNet |
-| Phase 1 | – | Encoder frozen, 50 epochs |
-| Phase 2 | – | Full model unfrozen, 50 epochs |
-| Total epochs | 100 | 100 |
+| Phase 1 | – | Encoder frozen, 50 epochs (LR 0.001) |
+| Phase 2 | – | Full model unfrozen, 50 epochs (LR 0.0001) |
+| Total epochs | 100 (LR 0.001) | 100 |
 
-## Setup
+## Design Choices
+
 | Item | Choice |
 |---|---|
-| Image size | 128×128 |
-| Normalization | Pixels scaled to [0, 1] |
-| Loss | BCE + Dice |
-| Optimizer | Adam (lr = `<LR>`) |
-| Batch size | `<BATCH_SIZE>` |
-| Train / Val / Test split | `<e.g. 70 / 15 / 15>` |
-| Seed | `<SEED>` |
-| Platform | Google Colab (`<GPU/TPU>`) |
+| Input size | 128 × 128 × 3 |
+| Image normalization | Pixels ÷ 255 → [0, 1] |
+| Mask processing | Grayscale, resized (nearest), pixel > 127 → 1 else 0 |
+| Split | 70% train / 15% val / 15% test (3,632 / 851 / 625 images) |
+| Split method | By original picture ID, so augmented copies of one picture never cross splits (no leakage) |
+| Loss | Binary Cross-Entropy + Dice Loss |
+| Optimizer | Adam |
+| Batch size | 16 |
+| Prediction threshold | 0.5 |
+| Seed | 42 |
+| Platform | Google Colab, T4 GPU, TensorFlow 2.20 |
 
 ## Results (Test Set)
 
 | Model | IoU | F1 | Accuracy | Precision | Recall | Training Time |
 |---|---|---|---|---|---|---|
-| Exp 1: Scratch | `<>` | `<>` | `<>` | `<>` | `<>` | `<>` |
-| Exp 2: Transfer Learning | `<>` | `<>` | `<>` | `<>` | `<>` | `<>` |
+| Exp 1: Scratch | 0.7148 | 0.8337 | 0.7900 | 0.8022 | 0.8677 | 49.6 min |
+| Exp 2: Transfer Learning | **0.7349** | **0.8472** | **0.8079** | **0.8185** | **0.8779** | **45.0 min** |
 
 ## Analysis
 
-**Performance:** `<Which model scored higher on IoU and F1, and why. E.g. pretrained ImageNet features give better low-level edge/texture filters, faster convergence, less overfitting.>`
+### Performance
+Transfer learning scored higher on every metric: IoU +0.0201, F1 +0.0135, accuracy +0.0179, precision +0.0163, recall +0.0102.
 
-**Efficiency:** `<Compare total training time of both runs. Note the frozen phase is faster per epoch (fewer trainable params). Discuss gain vs compute.>`
+- ImageNet weights already detect edges, textures and colors that help separate forest from non-forest.
+- The scratch model must learn all features from the training images alone. It reached ~0.98 train IoU but only ~0.71 validation IoU, which shows overfitting.
+- The frozen phase lets the new random decoder train without damaging the pretrained encoder. Fine-tuning at a lower LR then adapts the encoder to forest imagery.
+
+### Efficiency
+
+| | Time |
+|---|---|
+| Scratch (100 epochs) | 49.6 min (~29 s/epoch) |
+| Transfer, Phase 1 (frozen) | 20.3 min (~24 s/epoch) |
+| Transfer, Phase 2 (fine-tune) | 24.7 min (~29 s/epoch) |
+| Transfer total | 45.0 min |
+
+- Transfer learning was **4.6 min faster** and **more accurate**.
+- Frozen epochs are cheaper because no gradients are computed for the encoder.
+- Fine-tune epochs cost the same as scratch epochs.
+- Result: better performance at lower compute, so no real trade-off here.
 
 ## Visual Results
-
-Side-by-side: Original Image | Ground Truth | Scratch Prediction | Transfer Learning Prediction
-
-![Visual results](results/visual_comparison.png)
+Side-by-side comparison on test samples: Original Image | Ground Truth | Scratch Prediction | Transfer Prediction (see Section 10 of the notebook).
 
 ## Files
 ```
-├── notebook.ipynb          # All experiments with outputs
-├── README.md
-└── results/
-    └── visual_comparison.png
+├── 23L_2519_DLP_Assignment1.ipynb   # All experiments with outputs
+└── README.md
 ```
 
 ## How to Run
-1. Open `notebook.ipynb` in Google Colab.
-2. Download the dataset from Kaggle (or mount it) and set the data path.
-3. Install dependencies:
-   ```bash
-   pip install segmentation-models
-   ```
-4. Run all cells in order.
+1. Open the notebook in Google Colab and select **Runtime → Change runtime type → T4 GPU**.
+2. Run all cells in order. The dataset downloads automatically via `kagglehub`.
 
 ## Requirements
-- Python 3.x
-- TensorFlow / Keras
-- segmentation_models
-- NumPy, Pandas, OpenCV, Matplotlib, scikit-learn
+- `segmentation-models`, `tf-keras`, `kagglehub`
+- TensorFlow, NumPy, Pandas, OpenCV, Matplotlib
